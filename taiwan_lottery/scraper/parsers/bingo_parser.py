@@ -28,10 +28,20 @@ def _compute_sectors(numbers: list[int]) -> tuple[int, int, int, int]:
     return s1, s2, s3, s4
 
 
-def _parse_api_result(item: dict, draw_date: date) -> dict | None:
-    """Parse a single API result item into DB format."""
+# Bingo draws every 5 minutes, 203 draws/day from 07:05 to 23:55
+BINGO_FIRST_DRAW_HOUR = 7
+BINGO_FIRST_DRAW_MINUTE = 5
+BINGO_INTERVAL_MINUTES = 5
+
+
+def _parse_api_result(item: dict, draw_date: date, first_term: int) -> dict | None:
+    """Parse a single API result item into DB format.
+
+    first_term: the earliest drawTerm of this day, used to compute draw time.
+    """
     try:
-        draw_term = str(item.get("drawTerm", ""))
+        draw_term_raw = item.get("drawTerm", "")
+        draw_term = str(draw_term_raw)
         if not draw_term:
             return None
 
@@ -45,11 +55,14 @@ def _parse_api_result(item: dict, draw_date: date) -> dict | None:
         numbers = numbers[:20]
         s1, s2, s3, s4 = _compute_sectors(numbers)
 
-        # Derive approximate draw time from term number
-        # Term format: YYYNNNNNN where YYY=ROC year, NNNNNN=sequential
-        # Bingo draws every 5 minutes from 09:00 to 22:00
-        # We store draw_date + midnight as datetime
-        draw_datetime = datetime(draw_date.year, draw_date.month, draw_date.day)
+        # Compute draw time from term position within the day
+        # Each draw is 5 minutes apart, first draw at 09:00
+        draw_index = int(draw_term_raw) - first_term
+        base_time = datetime(
+            draw_date.year, draw_date.month, draw_date.day,
+            BINGO_FIRST_DRAW_HOUR, BINGO_FIRST_DRAW_MINUTE,
+        )
+        draw_datetime = base_time + timedelta(minutes=draw_index * BINGO_INTERVAL_MINUTES)
 
         return {
             "draw_term": draw_term,
@@ -88,9 +101,10 @@ class BingoScraper(BaseScraper):
         """Fetch all bingo draws for a specific date via API.
 
         Handles pagination — each page returns up to PAGE_SIZE results.
+        Determines the first term of the day to compute accurate draw times.
         """
         conn, headers = self._make_session()
-        all_draws = []
+        raw_items: list[dict] = []
 
         async with aiohttp.ClientSession(connector=conn) as client:
             page = 1
@@ -116,19 +130,28 @@ class BingoScraper(BaseScraper):
                         results = content.get("bingoQueryResult", [])
                         total_size = content.get("totalSize") or 0
 
-                        for item in results:
-                            parsed = _parse_api_result(item, target_date)
-                            if parsed:
-                                all_draws.append(parsed)
+                        raw_items.extend(results)
 
                         # Check if we need more pages
-                        if len(results) < PAGE_SIZE or len(all_draws) >= total_size:
+                        if len(results) < PAGE_SIZE or len(raw_items) >= total_size:
                             break
                         page += 1
 
                 except Exception as e:
                     logger.warning("Bingo API error for {} page {}: {}", target_date, page, e)
                     break
+
+        if not raw_items:
+            return []
+
+        # Find the first (smallest) term of the day to compute draw times
+        first_term = min(item.get("drawTerm", 0) for item in raw_items)
+
+        all_draws = []
+        for item in raw_items:
+            parsed = _parse_api_result(item, target_date, first_term)
+            if parsed:
+                all_draws.append(parsed)
 
         return all_draws
 

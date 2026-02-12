@@ -68,7 +68,10 @@ async def get_all_sorted_by_date(session: AsyncSession) -> list[BingoDraw]:
 
 async def upsert(session: AsyncSession, draw: dict) -> bool:
     stmt = insert(BingoDraw).values(**draw)
-    stmt = stmt.on_conflict_do_nothing(index_elements=["draw_term"])
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["draw_term"],
+        set_={"draw_datetime": draw["draw_datetime"]},
+    )
     result = await session.execute(stmt)
     return result.rowcount > 0
 
