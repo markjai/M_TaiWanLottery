@@ -1,0 +1,138 @@
+/* Taiwan Lottery Predictor Styles */
+
+:root {
+    --ball-size: 42px;
+    --ball-size-sm: 32px;
+    --ball-size-xs: 24px;
+}
+
+body {
+    background-color: #f5f6fa;
+}
+
+/* Lottery Ball Styles */
+.ball {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--ball-size);
+    height: var(--ball-size);
+    border-radius: 50%;
+    font-weight: bold;
+    font-size: 16px;
+    color: white;
+    margin: 2px;
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.3);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.ball-sm {
+    width: var(--ball-size-sm);
+    height: var(--ball-size-sm);
+    font-size: 13px;
+}
+
+.ball-xs {
+    width: var(--ball-size-xs);
+    height: var(--ball-size-xs);
+    font-size: 11px;
+}
+
+.ball-red { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+.ball-blue { background: linear-gradient(135deg, #3498db, #2980b9); }
+.ball-green { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+.ball-yellow { background: linear-gradient(135deg, #f39c12, #e67e22); color: #333; }
+.ball-normal { background: linear-gradient(135deg, #6c757d, #495057); }
+
+.ball-special {
+    background: linear-gradient(135deg, #9b59b6, #8e44ad);
+    border: 2px solid gold;
+}
+
+.ball-zone2 {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    border: 2px solid gold;
+}
+
+.ball-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    min-height: 46px;
+}
+
+.ball-container-bingo {
+    gap: 2px;
+}
+
+/* Cards */
+.lottery-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.lottery-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+
+.card {
+    border: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+/* Bingo Grid */
+.bingo-grid {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 4px;
+    max-width: 500px;
+}
+
+.bingo-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.bingo-cell.active {
+    background-color: #f39c12;
+    color: white;
+    font-weight: bold;
+    border-color: #e67e22;
+}
+
+/* Table */
+.bingo-nums .ball {
+    margin: 1px;
+}
+
+/* Prediction Cards */
+.prediction-card {
+    border-left: 4px solid #3498db;
+}
+
+.prediction-card .confidence {
+    font-size: 12px;
+    color: #7f8c8d;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    :root {
+        --ball-size: 36px;
+        --ball-size-sm: 28px;
+    }
+
+    .bingo-grid {
+        grid-template-columns: repeat(8, 1fr);
+    }
+}

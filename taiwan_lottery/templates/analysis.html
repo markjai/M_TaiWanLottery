@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}統計分析 - {{ game }}{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <h1><i class="bi bi-bar-chart-line"></i> 統計分析</h1>
+        <div class="btn-group mb-3" role="group">
+            <a href="/analysis/lotto649" class="btn btn-outline-danger {% if game == 'lotto649' %}active{% endif %}">大樂透</a>
+            <a href="/analysis/super_lotto" class="btn btn-outline-primary {% if game == 'super_lotto' %}active{% endif %}">威力彩</a>
+            <a href="/analysis/daily_cash" class="btn btn-outline-success {% if game == 'daily_cash' %}active{% endif %}">今彩539</a>
+            <a href="/analysis/bingo" class="btn btn-outline-warning {% if game == 'bingo' %}active{% endif %}">賓果賓果</a>
+        </div>
+    </div>
+</div>
+
+<!-- Frequency Chart -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">號碼出現頻率</h5>
+        <div>
+            <select class="form-select form-select-sm d-inline-block w-auto" id="freq-window">
+                <option value="">全部期數</option>
+                <option value="10">最近10期</option>
+                <option value="30">最近30期</option>
+                <option value="50">最近50期</option>
+                <option value="100">最近100期</option>
+            </select>
+        </div>
+    </div>
+    <div class="card-body">
+        <canvas id="frequencyChart" height="120"></canvas>
+    </div>
+</div>
+
+<!-- Hot/Cold Numbers -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="bi bi-fire"></i> 熱號 (Hot)</h5>
+            </div>
+            <div class="card-body" id="hot-numbers">載入中...</div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="bi bi-snow"></i> 冷號 (Cold)</h5>
+            </div>
+            <div class="card-body" id="cold-numbers">載入中...</div>
+        </div>
+    </div>
+</div>
+
+<!-- Gap Analysis -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">遺漏值分析 (Gap Analysis)</h5>
+    </div>
+    <div class="card-body">
+        <canvas id="gapChart" height="120"></canvas>
+        <div class="table-responsive mt-3">
+            <table class="table table-sm" id="gap-table">
+                <thead>
+                    <tr>
+                        <th>號碼</th>
+                        <th>目前遺漏</th>
+                        <th>平均遺漏</th>
+                        <th>最大遺漏</th>
+                        <th>遺漏比率</th>
+                    </tr>
+                </thead>
+                <tbody id="gap-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Pair Analysis -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">常見號碼配對 (Top 20)</h5>
+    </div>
+    <div class="card-body">
+        <div id="pairs-container">載入中...</div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/charts.js"></script>
+<script>
+const GAME = '{{ game }}';
+let freqChart = null;
+let gapChart = null;
+
+async function loadFrequency() {
+    const window = document.getElementById('freq-window').value;
+    let url = `/api/v1/stats/${GAME}/frequency`;
+    if (window) url += `?window=${window}`;
+
+    const resp = await fetch(url);
+    const data = await resp.json();
+
+    const labels = data.map(d => d.number);
+    const counts = data.map(d => d.count);
+
+    if (freqChart) freqChart.destroy();
+    freqChart = createBarChart('frequencyChart', labels, counts, '出現次數', getGameColor(GAME));
+}
+
+async function loadHotCold() {
+    const resp = await fetch(`/api/v1/stats/${GAME}/hot-cold?window=30`);
+    const data = await resp.json();
+
+    document.getElementById('hot-numbers').innerHTML = data.hot_numbers.map(n =>
+        `<span class="ball ball-red">${n.number}</span> <small class="text-muted">(${n.count}次, ${n.percentage}%)</small> `
+    ).join('') || '尚無資料';
+
+    document.getElementById('cold-numbers').innerHTML = data.cold_numbers.map(n =>
+        `<span class="ball ball-blue">${n.number}</span> <small class="text-muted">(${n.count}次, ${n.percentage}%)</small> `
+    ).join('') || '尚無資料';
+}
+
+async function loadGaps() {
+    const resp = await fetch(`/api/v1/stats/${GAME}/gaps`);
+    const data = await resp.json();
+
+    // Chart: top 20 by current gap
+    const top20 = data.slice(0, 20);
+    const labels = top20.map(d => d.number);
+    const gaps = top20.map(d => d.current_gap);
+
+    if (gapChart) gapChart.destroy();
+    gapChart = createBarChart('gapChart', labels, gaps, '目前遺漏期數', '#e74c3c');
+
+    // Table: top 30
+    document.getElementById('gap-tbody').innerHTML = data.slice(0, 30).map(d =>
+        `<tr class="${d.gap_ratio > 2 ? 'table-warning' : ''}">
+            <td><span class="ball ball-sm">${d.number}</span></td>
+            <td>${d.current_gap}</td>
+            <td>${d.average_gap}</td>
+            <td>${d.max_gap}</td>
+            <td>${d.gap_ratio}</td>
+        </tr>`
+    ).join('');
+}
+
+async function loadPairs() {
+    const resp = await fetch(`/api/v1/stats/${GAME}/pairs?top_n=20`);
+    const data = await resp.json();
+
+    document.getElementById('pairs-container').innerHTML = data.length > 0
+        ? data.map(p =>
+            `<span class="badge bg-secondary me-2 mb-2 fs-6">
+                ${p.pair[0]}-${p.pair[1]}
+                <small>(${p.count}次)</small>
+            </span>`
+        ).join('')
+        : '尚無資料';
+}
+
+document.getElementById('freq-window').addEventListener('change', loadFrequency);
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadFrequency();
+    loadHotCold();
+    loadGaps();
+    loadPairs();
+});
+</script>
+{% endblock %}

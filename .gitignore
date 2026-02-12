@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ML artifacts
+model_artifacts/*.pt
+model_artifacts/*.pth
+model_artifacts/*.pkl
+model_artifacts/*.json
+
+# OS
+Thumbs.db
+.DS_Store
+nul
+
+# Claude Code
+.claude/
+
+# Logs
+*.log
+
+# Database
+*.db
+*.sqlite3
