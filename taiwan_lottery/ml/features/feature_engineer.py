@@ -281,6 +281,155 @@ class FeatureEngineer:
         month_cos = math.cos(2 * math.pi * (month - 1) / 12)
         return np.array([dow_sin, dow_cos, month_sin, month_cos], dtype=np.float32)
 
+    # ── triple affinity ───────────────────────────────────────────────
+
+    def compute_triple_affinity(
+        self, history: list[list[int]], top_n: int = 100
+    ) -> dict[tuple[int, int, int], float]:
+        """Compute triple co-occurrence affinity scores."""
+        triple_counter = Counter()
+        total = len(history)
+
+        for nums in history:
+            for triple in combinations(sorted(nums), 3):
+                triple_counter[triple] += 1
+
+        affinity = {}
+        for triple, count in triple_counter.most_common(top_n):
+            affinity[triple] = count / total
+        return affinity
+
+    # ── number following (conditional probability) ────────────────────
+
+    def compute_number_following(
+        self, history: list[list[int]], top_n: int = 50
+    ) -> dict[tuple[int, int], float]:
+        """Compute P(B appears this draw | A appeared last draw).
+
+        Returns top_n (A, B) pairs with highest conditional probability.
+        """
+        if len(history) < 2:
+            return {}
+
+        # Count: how many times A appeared in draw t-1
+        a_count = Counter()
+        # Count: how many times B appeared in draw t when A was in draw t-1
+        ab_count = Counter()
+
+        for i in range(1, len(history)):
+            prev_set = set(history[i - 1])
+            curr_set = set(history[i])
+            for a in prev_set:
+                a_count[a] += 1
+                for b in curr_set:
+                    ab_count[(a, b)] += 1
+
+        following = {}
+        for (a, b), count in ab_count.most_common(top_n * 5):
+            if a_count[a] > 0:
+                following[(a, b)] = count / a_count[a]
+
+        # Return top_n by conditional probability
+        sorted_pairs = sorted(following.items(), key=lambda x: x[1], reverse=True)
+        return dict(sorted_pairs[:top_n])
+
+    # ── positional frequency ──────────────────────────────────────────
+
+    def compute_positional_frequency(self, history: list[list[int]]) -> np.ndarray:
+        """Compute how often each number appears at each sorted position.
+
+        Returns shape: (max_num, pick_count) — frequency of number n at position p.
+        """
+        total = max(len(history), 1)
+        freq = np.zeros((self.max_num, self.pick_count), dtype=np.float32)
+
+        for nums in history:
+            sorted_nums = sorted(nums)
+            for pos, num in enumerate(sorted_nums):
+                if 1 <= num <= self.max_num and pos < self.pick_count:
+                    freq[num - 1, pos] += 1
+
+        return freq / total
+
+    # ── momentum features ─────────────────────────────────────────────
+
+    def compute_momentum_features(
+        self, history: list[list[int]], windows: list[int] | None = None
+    ) -> np.ndarray:
+        """Compute frequency momentum (rate of change) for each number.
+
+        For each window, computes the difference between the frequency in
+        the recent half vs the older half of that window.
+
+        Returns shape: (max_num, len(windows))
+        """
+        if windows is None:
+            windows = [5, 10, 20]
+
+        features = np.zeros((self.max_num, len(windows)), dtype=np.float32)
+
+        for w_idx, window in enumerate(windows):
+            if len(history) < window:
+                continue
+            recent = history[-window:]
+            half = window // 2
+
+            # Recent half vs older half
+            older = recent[:half]
+            newer = recent[half:]
+
+            older_counter = Counter()
+            for nums in older:
+                older_counter.update(nums)
+            newer_counter = Counter()
+            for nums in newer:
+                newer_counter.update(nums)
+
+            older_total = max(len(older), 1)
+            newer_total = max(len(newer), 1)
+
+            for num in range(1, self.max_num + 1):
+                older_rate = older_counter.get(num, 0) / older_total
+                newer_rate = newer_counter.get(num, 0) / newer_total
+                features[num - 1, w_idx] = newer_rate - older_rate
+
+        return features
+
+    # ── mean reversion score ──────────────────────────────────────────
+
+    def compute_mean_reversion_score(self, history: list[list[int]]) -> np.ndarray:
+        """Compute mean reversion tendency for each number.
+
+        Numbers that are currently below their long-term average frequency
+        get a positive score (expected to revert up), and vice versa.
+
+        Returns shape: (max_num,)
+        """
+        scores = np.zeros(self.max_num, dtype=np.float32)
+        if len(history) < 50:
+            return scores
+
+        # Long-term frequency
+        long_counter = Counter()
+        for nums in history:
+            long_counter.update(nums)
+        long_total = len(history)
+
+        # Short-term frequency (last 20 draws)
+        short_window = min(20, len(history))
+        short_counter = Counter()
+        for nums in history[-short_window:]:
+            short_counter.update(nums)
+        short_total = short_window
+
+        for num in range(1, self.max_num + 1):
+            long_rate = long_counter.get(num, 0) / long_total
+            short_rate = short_counter.get(num, 0) / short_total
+            # Positive = below average recently (expected to revert up)
+            scores[num - 1] = long_rate - short_rate
+
+        return scores
+
     # ── pair affinity ────────────────────────────────────────────────
 
     def compute_pair_affinity(

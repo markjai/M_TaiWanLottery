@@ -92,6 +92,14 @@ class BacktestSummary(BaseModel):
     worst_miss_streak: int
     rolling_avg_last5: list[float]
     top_predicted_numbers: list[dict]
+    # Phase 1: statistical significance fields
+    monte_carlo_avg: float
+    monte_carlo_std: float
+    p_value: float
+    effect_size: float
+    confidence_interval_95: list[float]
+    quarterly_performance: list[float]
+    is_significant: bool
 
 
 class BacktestResponse(BaseModel):

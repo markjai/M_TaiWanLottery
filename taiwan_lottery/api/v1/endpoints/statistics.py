@@ -11,6 +11,7 @@ from taiwan_lottery.schemas.statistics import (
     HotColdAnalysis,
     GapAnalysis,
     PairFrequency,
+    BiasReport,
 )
 
 router = APIRouter()
@@ -62,3 +63,13 @@ async def pairs(
     """常見號碼配對分析."""
     _validate_game(game)
     return await stats.get_pairs(db, game, top_n=top_n)
+
+
+@router.get("/{game}/bias", response_model=BiasReport)
+async def bias_detection(
+    game: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """偏差檢測分析 — 卡方、序列隨機性、位置偏差."""
+    _validate_game(game)
+    return await stats.get_bias_report(db, game)

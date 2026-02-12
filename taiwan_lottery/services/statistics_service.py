@@ -156,3 +156,33 @@ async def get_pairs(
         ))
 
     return result
+
+
+async def get_bias_report(
+    session: AsyncSession, game_type: str
+) -> dict:
+    """Run full bias detection analysis."""
+    from taiwan_lottery.ml.bias_detector import BiasDetector
+
+    draws = await _get_all_draws(session, game_type)
+    if not draws:
+        return {
+            "game_type": game_type,
+            "total_draws": 0,
+            "chi_square_results": {},
+            "significant_biases": [],
+            "overall_uniformity_p": 1.0,
+            "runs_test_results": {},
+            "positional_bias": {},
+            "temporal_bias": None,
+        }
+
+    config = GAME_CONFIG[game_type]
+    number_lists = _extract_all_numbers(draws, game_type)
+
+    detector = BiasDetector(config["max_num"], config["pick_count"])
+    report = detector.full_report(number_lists)
+    report["game_type"] = game_type
+    report["total_draws"] = len(number_lists)
+
+    return report

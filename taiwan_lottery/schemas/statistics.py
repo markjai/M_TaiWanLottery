@@ -44,3 +44,14 @@ class StatisticsResponse(BaseModel):
     gaps: list[GapAnalysis] | None = None
     pairs: list[PairFrequency] | None = None
     sum_distribution: list[SumDistribution] | None = None
+
+
+class BiasReport(BaseModel):
+    game_type: str
+    total_draws: int
+    chi_square_results: dict
+    significant_biases: list[dict]
+    overall_uniformity_p: float
+    runs_test_results: dict
+    positional_bias: dict
+    temporal_bias: dict | None = None

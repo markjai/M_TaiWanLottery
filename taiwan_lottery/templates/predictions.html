@@ -160,8 +160,67 @@
         <div id="eval-result"></div>
     </div>
 </div>
+
+<!-- Backtest -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-arrow-repeat"></i> 回測分析 (Backtest)</h5>
+    </div>
+    <div class="card-body">
+        <div class="row g-3 mb-3">
+            <div class="col-md-3">
+                <label class="form-label">彩券類型</label>
+                <select class="form-select" id="bt-game">
+                    <option value="lotto649">大樂透</option>
+                    <option value="super_lotto">威力彩</option>
+                    <option value="daily_cash">今彩539</option>
+                    <option value="bingo">賓果賓果</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">模型類型</label>
+                <select class="form-select" id="bt-model">
+                    <option value="frequency">統計頻率模型</option>
+                    <option value="lstm">LSTM</option>
+                    <option value="dqn">DQN</option>
+                    <option value="ensemble">綜合模型</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">測試期數</label>
+                <select class="form-select" id="bt-test-size">
+                    <option value="30">30 期</option>
+                    <option value="50" selected>50 期</option>
+                    <option value="100">100 期</option>
+                    <option value="200">200 期</option>
+                </select>
+            </div>
+            <div class="col-md-2" id="bt-pick-count-wrapper" style="display:none;">
+                <label class="form-label">選取個數</label>
+                <select class="form-select" id="bt-pick-count">
+                    <option value="3">3 個</option>
+                    <option value="5" selected>5 個</option>
+                    <option value="8">8 個</option>
+                    <option value="10">10 個</option>
+                </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-end gap-2">
+                <button class="btn btn-warning" onclick="runBacktest(false)" id="bt-btn">
+                    <i class="bi bi-play-fill"></i> 單一回測
+                </button>
+            </div>
+        </div>
+        <div class="mb-3">
+            <button class="btn btn-outline-warning btn-sm" onclick="runBacktest(true)" id="bt-compare-btn">
+                <i class="bi bi-bar-chart-steps"></i> 比較所有模型
+            </button>
+        </div>
+        <div id="bt-result"></div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="/static/js/charts.js"></script>
 <script src="/static/js/predictions.js"></script>
 {% endblock %}

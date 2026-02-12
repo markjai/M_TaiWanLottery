@@ -119,9 +119,18 @@ async def run_backtest_service(
             message=f"Comparison backtest on {test_size} draws (pick={actual_pick_count}, {len(history)} total)",
         )
 
+    # Pre-compute bias boost for frequency model
+    if model_type == "frequency":
+        from taiwan_lottery.ml.bias_detector import BiasDetector
+        detector = BiasDetector(max_num, actual_pick_count)
+        bias_boost = detector.get_bias_boost(history)
+    else:
+        bias_boost = None
+
     result = run_backtest(
         history, max_num, actual_pick_count,
         model_type=model_type, test_size=test_size,
+        bias_boost=bias_boost,
     )
 
     # Strip details for API response (too large)

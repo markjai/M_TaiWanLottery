@@ -8,6 +8,7 @@ from collections import Counter
 
 import numpy as np
 from loguru import logger
+from scipy import stats as sp_stats
 
 from taiwan_lottery.config import settings
 from taiwan_lottery.ml.models.base_model import BaseLotteryModel
@@ -40,6 +41,7 @@ def run_backtest(
     model_type: str = "ensemble",
     test_size: int = 100,
     retrain_every: int | None = None,
+    bias_boost: "np.ndarray | None" = None,
 ) -> dict:
     """Run walk-forward backtest.
 
@@ -87,6 +89,8 @@ def run_backtest(
 
     # Initial training
     model = _create_model(model_type, max_num, pick_count)
+    if bias_boost is not None and hasattr(model, "bias_boost"):
+        model.bias_boost = bias_boost
     model.train(train_data)
 
     # Walk-forward evaluation
@@ -105,6 +109,8 @@ def run_backtest(
         if retrain_every and i > 0 and i % retrain_every == 0:
             logger.info("[backtest] Retraining at step {}/{}", i, test_size)
             model = _create_model(model_type, max_num, pick_count)
+            if bias_boost is not None and hasattr(model, "bias_boost"):
+                model.bias_boost = bias_boost
             retrain_data = train_history + test_draws[:i]
             if max_train and len(retrain_data) > max_train:
                 retrain_data = retrain_data[-max_train:]
@@ -166,6 +172,15 @@ def run_backtest(
             "accuracy": round(total_hit / max(total_pred, 1), 4),
         })
 
+    # Monte Carlo baseline simulation
+    mc = _monte_carlo_baseline(test_draws, max_num, pick_count)
+
+    # Statistical significance tests
+    sig = _statistical_significance(hit_array, expected_random)
+
+    # Quarterly performance analysis
+    quarterly = _quarterly_performance(hit_counts)
+
     return {
         "model_type": model_type,
         "test_size": int(test_size),
@@ -190,8 +205,105 @@ def run_backtest(
         "worst_miss_streak": int(worst_streak),
         "rolling_avg_last5": rolling_avg[-5:] if rolling_avg else [],
         "top_predicted_numbers": top_numbers,
+        # Phase 1 additions
+        "monte_carlo_avg": mc["random_avg_hits"],
+        "monte_carlo_std": mc["random_std"],
+        "p_value": sig["p_value"],
+        "effect_size": sig["effect_size"],
+        "confidence_interval_95": sig["confidence_interval_95"],
+        "quarterly_performance": quarterly,
+        "is_significant": sig["p_value"] < 0.05,
         "details": results,
     }
+
+
+def _monte_carlo_baseline(
+    test_draws: list[list[int]],
+    max_num: int,
+    pick_count: int,
+    n_simulations: int = 10000,
+) -> dict:
+    """Simulate random picking to establish a baseline for comparison.
+
+    For each test draw, randomly pick `pick_count` numbers `n_simulations` times
+    and compute how many hits a random strategy would get on average.
+    """
+    rng = np.random.default_rng(42)
+    all_nums = np.arange(1, max_num + 1)
+
+    # For each simulation run, compute total hits across all test draws
+    sim_total_hits = np.zeros(n_simulations, dtype=np.int64)
+    for actual in test_draws:
+        actual_set = set(actual)
+        for s in range(n_simulations):
+            random_pick = rng.choice(all_nums, size=pick_count, replace=False)
+            sim_total_hits[s] += len(actual_set & set(random_pick))
+
+    # Average hits per draw for each simulation
+    sim_avg_per_draw = sim_total_hits / len(test_draws)
+
+    return {
+        "random_avg_hits": round(float(sim_avg_per_draw.mean()), 4),
+        "random_std": round(float(sim_avg_per_draw.std()), 4),
+        "random_hit_distribution": {
+            str(int(k)): int(v)
+            for k, v in sorted(Counter(sim_total_hits).items())
+        },
+    }
+
+
+def _statistical_significance(hit_array: np.ndarray, expected_random: float) -> dict:
+    """Compute statistical significance of model hits vs random expectation.
+
+    Uses one-sample t-test and Cohen's d effect size.
+    """
+    n = len(hit_array)
+    model_mean = float(hit_array.mean())
+    model_std = float(hit_array.std(ddof=1)) if n > 1 else 0.0
+
+    # One-sample t-test: is model mean significantly different from expected_random?
+    if n > 1 and model_std > 0:
+        t_stat, p_two = sp_stats.ttest_1samp(hit_array, expected_random)
+        # One-sided p-value (model > random)
+        p_value = float(p_two / 2) if t_stat > 0 else 1.0 - float(p_two / 2)
+    else:
+        p_value = 1.0
+
+    # Cohen's d effect size
+    if model_std > 0:
+        effect_size = (model_mean - expected_random) / model_std
+    else:
+        effect_size = 0.0
+
+    # 95% confidence interval for model mean
+    if n > 1:
+        se = model_std / np.sqrt(n)
+        ci_low = model_mean - 1.96 * se
+        ci_high = model_mean + 1.96 * se
+    else:
+        ci_low = ci_high = model_mean
+
+    return {
+        "p_value": round(p_value, 6),
+        "effect_size": round(effect_size, 4),
+        "confidence_interval_95": [round(float(ci_low), 4), round(float(ci_high), 4)],
+    }
+
+
+def _quarterly_performance(hit_counts: list[int]) -> list[float]:
+    """Split test period into 4 quarters and compute average hits for each."""
+    n = len(hit_counts)
+    if n < 4:
+        return [round(float(np.mean(hit_counts)), 4)] if hit_counts else []
+
+    quarter_size = n // 4
+    quarters = []
+    for q in range(4):
+        start = q * quarter_size
+        end = start + quarter_size if q < 3 else n
+        q_hits = hit_counts[start:end]
+        quarters.append(round(float(np.mean(q_hits)), 4))
+    return quarters
 
 
 def _longest_streak(values: list[int], condition) -> int:
@@ -247,6 +359,9 @@ def run_comparison_backtest(
                 "expected_random": r["expected_random"],
                 "lift_vs_random": r["lift_vs_random"],
                 "hit_rate_nonzero": r["hit_rate_nonzero"],
+                "p_value": r.get("p_value"),
+                "is_significant": r.get("is_significant"),
+                "effect_size": r.get("effect_size"),
             })
 
     return {

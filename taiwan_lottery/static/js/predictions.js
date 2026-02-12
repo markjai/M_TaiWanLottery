@@ -226,6 +226,293 @@ async function evaluateModel() {
     }
 }
 
+/* ── Backtest ───────────────────────────────────────────────── */
+
+let btQuarterChart = null;
+let btHitDistChart = null;
+
+async function runBacktest(compareAll = false) {
+    const game = document.getElementById('bt-game').value;
+    const model = document.getElementById('bt-model').value;
+    const testSize = parseInt(document.getElementById('bt-test-size').value);
+    const btn = document.getElementById(compareAll ? 'bt-compare-btn' : 'bt-btn');
+    const resultDiv = document.getElementById('bt-result');
+
+    const body = {
+        game_type: game,
+        model_type: model,
+        test_size: testSize,
+        compare_all: compareAll,
+    };
+    if (game === 'bingo') {
+        body.pick_count = parseInt(document.getElementById('bt-pick-count').value);
+    }
+
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 回測中...';
+    resultDiv.innerHTML = `
+        <div class="alert alert-info">
+            <div class="d-flex align-items-center gap-2">
+                <div class="spinner-border spinner-border-sm"></div>
+                正在執行回測，可能需要數十秒至數分鐘...
+            </div>
+        </div>`;
+
+    try {
+        const resp = await fetch('/api/v1/ml/backtest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+            resultDiv.innerHTML = `<div class="alert alert-danger">${data.detail || JSON.stringify(data)}</div>`;
+            return;
+        }
+
+        if (compareAll && data.comparison) {
+            resultDiv.innerHTML = renderComparison(data, game);
+        } else if (data.backtest) {
+            resultDiv.innerHTML = renderBacktestResult(data.backtest, game);
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-warning">無回測結果</div>`;
+        }
+    } catch (e) {
+        resultDiv.innerHTML = `<div class="alert alert-danger">錯誤: ${e.message}</div>`;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+    }
+}
+
+function renderBacktestResult(bt, game) {
+    // Significance badge
+    const sigBadge = bt.is_significant
+        ? '<span class="badge bg-success">顯著優於隨機</span>'
+        : '<span class="badge bg-secondary">未達顯著</span>';
+
+    // p-value color
+    const pColor = bt.p_value < 0.01 ? 'text-success fw-bold'
+        : bt.p_value < 0.05 ? 'text-success'
+        : bt.p_value < 0.1 ? 'text-warning'
+        : 'text-danger';
+
+    // Effect size interpretation
+    const esLabel = Math.abs(bt.effect_size) >= 0.8 ? '大效果'
+        : Math.abs(bt.effect_size) >= 0.5 ? '中效果'
+        : Math.abs(bt.effect_size) >= 0.2 ? '小效果'
+        : '極小效果';
+
+    // Lift color
+    const liftColor = bt.lift_vs_random >= 1.1 ? 'text-success fw-bold'
+        : bt.lift_vs_random >= 1.0 ? 'text-success'
+        : 'text-danger';
+
+    // Quarterly trend arrow
+    const qp = bt.quarterly_performance || [];
+    let trendIcon = '';
+    if (qp.length === 4) {
+        const firstHalf = (qp[0] + qp[1]) / 2;
+        const secondHalf = (qp[2] + qp[3]) / 2;
+        trendIcon = secondHalf > firstHalf + 0.05
+            ? '<i class="bi bi-arrow-up-circle-fill text-success"></i> 上升趨勢'
+            : secondHalf < firstHalf - 0.05
+            ? '<i class="bi bi-arrow-down-circle-fill text-danger"></i> 下降趨勢'
+            : '<i class="bi bi-dash-circle text-muted"></i> 持平';
+    }
+
+    // Hit distribution bar
+    const hitDist = bt.hit_distribution || {};
+    const totalTests = bt.test_size;
+    let hitDistBars = '';
+    const distColors = ['#dc3545', '#fd7e14', '#ffc107', '#28a745', '#0d6efd', '#6610f2'];
+    for (const [hits, count] of Object.entries(hitDist)) {
+        const pct = (count / totalTests * 100).toFixed(1);
+        const color = distColors[Math.min(parseInt(hits), distColors.length - 1)];
+        hitDistBars += `
+            <div class="d-flex align-items-center gap-1 mb-1">
+                <span style="min-width:60px">${hits} 中: ${count}次</span>
+                <div style="flex:1;background:#e9ecef;border-radius:3px;height:18px">
+                    <div style="width:${pct}%;background:${color};height:100%;border-radius:3px;min-width:${pct > 0 ? '2px' : '0'}"></div>
+                </div>
+                <span class="small text-muted" style="min-width:40px">${pct}%</span>
+            </div>`;
+    }
+
+    // Quarterly chart
+    const qpId = 'bt-quarter-chart-' + Date.now();
+    const hitDistId = 'bt-hitdist-chart-' + Date.now();
+
+    const html = `
+        <div class="row g-3">
+            <!-- 左欄：核心指標 -->
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <strong>${MODEL_NAMES[bt.model_type] || bt.model_type} 回測結果</strong>
+                        ${sigBadge}
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-sm mb-3">
+                            <tr><td>測試期數</td><td class="fw-bold">${bt.test_size} 期</td></tr>
+                            <tr><td>訓練資料</td><td>${bt.train_size} 期</td></tr>
+                            <tr>
+                                <td>模型平均命中</td>
+                                <td class="fw-bold fs-5">${bt.average_hits}</td>
+                            </tr>
+                            <tr>
+                                <td>蒙特卡羅隨機基準</td>
+                                <td>${bt.monte_carlo_avg} <small class="text-muted">(SD: ${bt.monte_carlo_std})</small></td>
+                            </tr>
+                            <tr>
+                                <td>理論隨機期望值</td>
+                                <td>${bt.expected_random}</td>
+                            </tr>
+                            <tr>
+                                <td>Lift 倍率（vs 隨機）</td>
+                                <td class="${liftColor}">${bt.lift_vs_random}x</td>
+                            </tr>
+                        </table>
+
+                        <h6 class="mt-3">統計顯著性</h6>
+                        <table class="table table-sm">
+                            <tr>
+                                <td>p-value</td>
+                                <td class="${pColor}">${bt.p_value < 0.001 ? '< 0.001' : bt.p_value.toFixed(4)}</td>
+                            </tr>
+                            <tr>
+                                <td>效果量 (Cohen's d)</td>
+                                <td>${bt.effect_size.toFixed(4)} <small class="text-muted">(${esLabel})</small></td>
+                            </tr>
+                            <tr>
+                                <td>95% 信賴區間</td>
+                                <td>[${bt.confidence_interval_95[0]}, ${bt.confidence_interval_95[1]}]</td>
+                            </tr>
+                            <tr><td>命中標準差</td><td>${bt.std_hits}</td></tr>
+                            <tr><td>最大/最小命中</td><td>${bt.max_hits} / ${bt.min_hits}</td></tr>
+                            <tr><td>命中率（非零）</td><td>${(bt.hit_rate_nonzero * 100).toFixed(1)}%</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右欄：圖表 -->
+            <div class="col-md-6">
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <strong>命中分佈</strong>
+                    </div>
+                    <div class="card-body">
+                        ${hitDistBars}
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <strong>各季度表現</strong>
+                        <small>${trendIcon}</small>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="${qpId}" height="150"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><strong>連勝/連敗紀錄</strong></div>
+                    <div class="card-body py-2">
+                        <span class="badge bg-success me-2">最長連續命中: ${bt.best_hit_streak} 期</span>
+                        <span class="badge bg-danger">最長連續未中: ${bt.worst_miss_streak} 期</span>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+    // Render charts after DOM update
+    setTimeout(() => {
+        const qpCanvas = document.getElementById(qpId);
+        if (qpCanvas && qp.length > 0) {
+            if (btQuarterChart) btQuarterChart.destroy();
+            btQuarterChart = new Chart(qpCanvas.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: ['Q1 (早期)', 'Q2', 'Q3', 'Q4 (近期)'],
+                    datasets: [{
+                        label: '平均命中',
+                        data: qp,
+                        backgroundColor: ['#6c757d99', '#6c757d99', '#ffc10799', '#28a74599'],
+                        borderColor: ['#6c757d', '#6c757d', '#ffc107', '#28a745'],
+                        borderWidth: 1,
+                    }, {
+                        label: '隨機基準',
+                        data: [bt.monte_carlo_avg, bt.monte_carlo_avg, bt.monte_carlo_avg, bt.monte_carlo_avg],
+                        type: 'line',
+                        borderColor: '#dc3545',
+                        borderDash: [5, 5],
+                        pointRadius: 0,
+                        fill: false,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: true, position: 'bottom' } },
+                    scales: { y: { beginAtZero: true, title: { display: true, text: '平均命中數' } } },
+                },
+            });
+        }
+    }, 100);
+
+    return html;
+}
+
+function renderComparison(data, game) {
+    const rows = data.comparison.map(c => {
+        if (c.error) {
+            return `<tr><td>${MODEL_NAMES[c.model] || c.model}</td><td colspan="7" class="text-danger">${c.error}</td></tr>`;
+        }
+        const sigBadge = c.is_significant
+            ? '<span class="badge bg-success">Yes</span>'
+            : '<span class="badge bg-secondary">No</span>';
+        const liftColor = c.lift_vs_random >= 1.1 ? 'text-success fw-bold'
+            : c.lift_vs_random >= 1.0 ? 'text-success' : 'text-danger';
+        const pColor = c.p_value < 0.05 ? 'text-success' : 'text-muted';
+        return `
+            <tr>
+                <td class="fw-bold">${MODEL_NAMES[c.model] || c.model}</td>
+                <td class="fw-bold">${c.avg_hits}</td>
+                <td>${c.std_hits}</td>
+                <td>${c.max_hits}</td>
+                <td class="${liftColor}">${c.lift_vs_random}x</td>
+                <td>${(c.hit_rate_nonzero * 100).toFixed(1)}%</td>
+                <td class="${pColor}">${c.p_value != null ? (c.p_value < 0.001 ? '< 0.001' : c.p_value.toFixed(4)) : '-'}</td>
+                <td>${sigBadge}</td>
+            </tr>`;
+    }).join('');
+
+    return `
+        <div class="card">
+            <div class="card-header"><strong>所有模型比較 (${data.comparison.length} 個模型, ${data.comparison[0]?.expected_random ? '隨機期望 ' + data.comparison[0].expected_random : ''})</strong></div>
+            <div class="card-body table-responsive">
+                <table class="table table-hover table-sm">
+                    <thead>
+                        <tr>
+                            <th>模型</th>
+                            <th>平均命中</th>
+                            <th>標準差</th>
+                            <th>最大命中</th>
+                            <th>Lift 倍率</th>
+                            <th>命中率</th>
+                            <th>p-value</th>
+                            <th>顯著?</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        </div>`;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     loadModels();
 
@@ -234,4 +521,10 @@ document.addEventListener('DOMContentLoaded', () => {
         togglePickCount('train-game', 'train-pick-count-wrapper'));
     document.getElementById('predict-game').addEventListener('change', () =>
         togglePickCount('predict-game', 'predict-pick-count-wrapper'));
+
+    const btGame = document.getElementById('bt-game');
+    if (btGame) {
+        btGame.addEventListener('change', () =>
+            togglePickCount('bt-game', 'bt-pick-count-wrapper'));
+    }
 });
