@@ -53,7 +53,10 @@ class BiasDetector:
                 dtype=np.float64,
             )
             # Expected frequency under uniform distribution
-            expected_per_num = total_draws * self.pick_count / self.max_num
+            # Use actual total occurrences to compute expected (handles bingo where
+            # draw_count != pick_count)
+            total_occurrences = observed.sum()
+            expected_per_num = total_occurrences / self.max_num
             expected = np.full(self.max_num, expected_per_num, dtype=np.float64)
 
             # Overall chi-square test

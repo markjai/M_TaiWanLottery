@@ -148,7 +148,12 @@ def run_backtest(
     hit_dist = Counter(hit_counts)
 
     # Expected hits by random chance
-    expected_random = pick_count * pick_count / max_num
+    # For bingo: 20 numbers drawn from 80, so draw_count != pick_count
+    if max_num >= 80:
+        draw_count = 20  # bingo draws 20 numbers per period
+        expected_random = pick_count * draw_count / max_num
+    else:
+        expected_random = pick_count * pick_count / max_num
 
     # Compute rolling averages (windows of 20)
     window = min(20, len(hit_counts))
